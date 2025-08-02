@@ -12,6 +12,10 @@ import threading
 
 mail_db = 'mail.db'
 
+online = set()
+online_lock = threading.Lock()
+
+
 def send(s, str_):
     s.send(str_.encode('utf-8'))
 
@@ -132,21 +136,45 @@ def send_mail(from_, to, msg, socket):
     con.commit()
     con.close()
 
+def list_online(s):
+    global online_lock
+    global online
+
+    online_lock.acquire()
+    temp = online
+    online_lock.release()
+
+    if len(temp) > 0:
+        send(s, f'Currently on-line:\n')
+        send(s, ', '.join(temp) + '\n')
+
 
 def client_handler(s, call, is_tcp):
+    global online_lock
+    global online
+
     h_for_help = True
 
     send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n\n')
 
     if is_tcp:
-        send(s, 'Please enter your call sign: ')
-        call = get_line(s)
-        if call is None:
-            s.close()
-            return
-        call = call.upper()
+        while True:
+            send(s, 'Please enter your call sign: ')
+            call = get_line(s)
+            if call is None:
+                s.close()
+                return
+            call = call.upper()
+
+            if len(call) > 0:
+                break
 
     send(s, f'\nWelcome {call}!\n\n')
+
+    online_lock.acquire()
+    online.add(call)
+    online_lock.release()
+    list_online(s)
 
     menu = 0
 
@@ -167,6 +195,9 @@ def client_handler(s, call, is_tcp):
             if cmd == None:
                 break
             parts = cmd.split()
+            if len(parts) == 0:
+                h_for_help = True
+                continue
 
             if menu == 0:
                 if parts[0] == 'h':
@@ -174,6 +205,7 @@ def client_handler(s, call, is_tcp):
                     send(s, 'M - mail\n')
                     send(s, 'q - disconnect\n')
                     send(s, 'a - archie\n')
+                    send(s, 'o - users on-line\n')
                     send(s, 'c callsign - connect to "callsign"\n')
 
                 elif parts[0] == 'q':
@@ -181,6 +213,9 @@ def client_handler(s, call, is_tcp):
 
                 elif parts[0] == 'm':
                     redirect_prog('/usr/bin/mheard', s)
+
+                elif parts[0] == 'o':
+                    list_online(s)
 
                 elif parts[0] == 'M':
                     menu = 1
@@ -235,6 +270,9 @@ def client_handler(s, call, is_tcp):
 
     s.close()
 
+    online_lock.acquire()
+    online.remove(call)
+    online_lock.release()
 
 # create mail database
 con = sqlite3.connect(mail_db)
