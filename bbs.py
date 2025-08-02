@@ -4,10 +4,13 @@ import ax25.socket
 import os
 import select
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
 
+
+mail_db = 'mail.db'
 
 def send(s, str_):
     s.send(str_.encode('utf-8'))
@@ -81,10 +84,71 @@ def redirect_telnet(addr, socket):
         send(socket, f'Exception {e} while performing telnet, line number: {e.__traceback__.tb_lineno}\n')
 
 
-def client_handler(s, call):
+def list_mail(call, socket):
+    con = sqlite3.connect(mail_db)
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT id, `from`, `when` FROM mail WHERE `when` >= date('now','-1 month') AND `to`=? ORDER BY `when` DESC", (call,))
+        for row in cur:
+            send(socket, f'{row[0]}: {row[1]} - {row[2]}\n')
+    except Exception as e:
+        send(socket, f'Exception {e} while performing list_mail, line number: {e.__traceback__.tb_lineno}\n')
+    cur.close()
+    con.close()
+
+
+def get_mail(nr, socket):
+    con = sqlite3.connect(mail_db)
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT `from`, `when`, what FROM mail WHERE id=?", (nr,))
+        row = cur.fetchone()
+        send(socket, f'From: {row[0]} ({row[1]})\n')
+        for line in row[2].split('\n'):
+            send(socket, line + '\n')
+    except Exception as e:
+        send(socket, f'Exception {e} while performing get_mail, line number: {e.__traceback__.tb_lineno}\n')
+    cur.close()
+    con.close()
+
+
+def get_line(socket):
+    line = socket.recv(256)
+    if line == None:
+        return None
+
+    line = line.decode('ascii').rstrip('\n').rstrip('\r').strip()
+    return line
+
+
+def send_mail(from_, to, msg, socket):
+    con = sqlite3.connect(mail_db)
+    cur = con.cursor()
+    try:
+        cur.execute('INSERT INTO mail(`id`, `from`, `to`, `when`, what) VALUES(NULL, ?, ?, CURRENT_TIMESTAMP, ?)', (from_, to, msg))
+    except Exception as e:
+        send(socket, f'Exception {e} while performing send_mail, line number: {e.__traceback__.tb_lineno}\n')
+    cur.close()
+    con.commit()
+    con.close()
+
+
+def client_handler(s, call, is_tcp):
     h_for_help = True
 
-    send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n')
+    send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n\n')
+
+    if is_tcp:
+        send(s, 'Please enter your call sign: ')
+        call = get_line(s)
+        if call is None:
+            s.close()
+            return
+        call = call.upper()
+
+    send(s, f'\nWelcome {call}!\n\n')
+
+    menu = 0
 
     try:
         while True:
@@ -92,34 +156,77 @@ def client_handler(s, call):
                 send(s, 'Enter "h" (+ enter) for help\n')
                 h_for_help = False
 
-            cmd = s.recv(256)
+            if menu == 0:
+                send(s, 'main] ')
+            elif menu == 1:
+                send(s, 'msgs] ')
+            else:
+                send(s, 'internal error\n')
+                break
+            cmd = get_line(s)
             if cmd == None:
                 break
-
-            cmd = cmd.decode('ascii').rstrip('\n').rstrip('\r').strip()
             parts = cmd.split()
 
-            if parts[0] == 'h':
-                send(s, 'm - mheard\n')
-                send(s, 'q - disconnect\n')
-                send(s, 'a - archie\n')
-                send(s, 'c callsign - connect to "callsign"\n')
+            if menu == 0:
+                if parts[0] == 'h':
+                    send(s, 'm - mheard\n')
+                    send(s, 'M - mail\n')
+                    send(s, 'q - disconnect\n')
+                    send(s, 'a - archie\n')
+                    send(s, 'c callsign - connect to "callsign"\n')
 
-            elif parts[0] == 'q':
-                break
+                elif parts[0] == 'q':
+                    break
 
-            elif parts[0] == 'm':
-                redirect_prog('/usr/bin/mheard', s)
+                elif parts[0] == 'm':
+                    redirect_prog('/usr/bin/mheard', s)
 
-            elif parts[0] == 'c' and len(parts) == 2:
-                redirect_axcall(parts[1], s)
+                elif parts[0] == 'M':
+                    menu = 1
+                    h_for_help = True
 
-            elif parts[0] == 'a':
-                redirect_telnet(('localhost', 2030), s)
+                elif parts[0] == 'c' and len(parts) == 2:
+                    redirect_axcall(parts[1], s)
 
-            else:
-                send(s, '???\n')
-                h_for_help = True
+                elif parts[0] == 'a':
+                    redirect_telnet(('localhost', 2030), s)
+
+                else:
+                    send(s, '???\n')
+                    h_for_help = True
+
+            elif menu == 1:
+                if parts[0] == 'h':
+                    send(s, 'l - list mail\n')
+                    send(s, 'g x - show mail with number x\n')
+                    send(s, 's - send mail\n')
+                    send(s, 'p - previous menu\n')
+
+                elif parts[0] == 'p':
+                    menu = 0
+                    h_for_help = True
+
+                elif parts[0] == 'l':
+                    list_mail(call, s)
+
+                elif parts[0] == 'g' and len(parts) == 2:
+                    get_mail(parts[1], s)
+
+                elif parts[0] == 's':
+                    send(s, 'To: ')
+                    to = get_line(s)
+                    if to == None:
+                        continue
+                    send(s, 'Message (max. 200 characters): ')
+                    msg = get_line(s)
+                    if msg == None:
+                        continue
+                    send_mail(call, to.upper(), msg, s)
+
+                else:
+                    send(s, '???\n')
+                    h_for_help = True
 
     except Exception as e:
         send(s, f'Internal error: {e}, line number: {e.__traceback__.tb_lineno}\n')
@@ -127,6 +234,20 @@ def client_handler(s, call):
     send(s, 'Bye bye\n\n')
 
     s.close()
+
+
+# create mail database
+con = sqlite3.connect(mail_db)
+try:
+    cur = con.cursor()
+    cur.execute('pragma journal_mode=wal')
+    cur.execute('CREATE TABLE mail(`id` integer primary key, `from` text, `to` text, `when` int, what text)')
+    cur.close()
+    con.commit()
+except Exception as e:
+    print(e)
+    pass
+con.close()
 
 
 if 'tcp' in sys.argv:
@@ -145,6 +266,6 @@ while True:
 
     print(f'Connected to {client[1]}')
 
-    t = threading.Thread(target=client_handler, args=(client[0], client[1],))
+    t = threading.Thread(target=client_handler, args=(client[0], client[1], 'tcp' in sys.argv))
     t.daemon = True
     t.start()
