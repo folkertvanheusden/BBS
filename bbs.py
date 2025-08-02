@@ -66,8 +66,25 @@ def redirect_axcall(callsign, socket):
         send(socket, f'Exception {e} while performing axcall, line number: {e.__traceback__.tb_lineno}\n')
 
 
+def redirect_telnet(addr, socket):
+    try:
+        to_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rc = to_socket.connect(addr)
+        if rc != 0:
+            to_socket.close()
+            send(socket, f'Cannot connect to {callsign}: {os.strerror(rc)}\n')
+            return
+
+        redirect_sockets(to_socket, socket)
+
+    except Exception as e:
+        send(socket, f'Exception {e} while performing telnet, line number: {e.__traceback__.tb_lineno}\n')
+
+
 def client_handler(s, call):
     h_for_help = True
+
+    send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n')
 
     try:
         while True:
@@ -96,6 +113,9 @@ def client_handler(s, call):
 
             elif parts[0] == 'c' and len(parts) == 2:
                 redirect_axcall(parts[1], s)
+
+            elif parts[0] == 'a':
+                redirect_telnet(('localhost', 2030), s)
 
             else:
                 send(s, '???\n')
