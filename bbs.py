@@ -21,104 +21,112 @@ def send(s, str_):
     s.send(str_.encode('utf-8'))
 
 
-def redirect_prog(cmd, socket):
+def redirect_prog(cmd, s):
     try:
         result = subprocess.run([cmd], capture_output=True, text=True).stdout
         for line in result.split('\n'):
-            send(socket, line + '\n')
+            send(s, line + '\n')
 
     except Exception as e:
-        send(socket, f'Exception {e} while performing command, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing command, line number: {e.__traceback__.tb_lineno}\n')
 
 
-def redirect_sockets(to_socket, socket):
+def redirect_sockets(to_socket, from_socket):
     try:
         p = select.poll()
-        p.register(socket, select.POLLIN)
+        p.register(from_socket, select.POLLIN)
         p.register(to_socket, select.POLLIN)
+
+        from_socket_fd = from_socket.fileno()
+        to_socket_fd = to_socket.fileno()
 
         while True:
             rc = p.poll(86400)
             if len(rc) == 0:
-                send(socket, 'timeout\n')
+                send(from_socket, 'timeout\n')
                 break
 
             for e in rc:
-                if e[0] == socket:
-                    msg = socket.recv(256)
+                if e[0] == from_socket_fd:
+                    msg = from_socket.recv(256)
+                    print(msg)
                     send(to_socket, msg.decode('ascii') + '\n')
 
-                elif e[0] == to_socket:
+                elif e[0] == to_socket_fd:
                     msg = to_socket.recv(256)
-                    send(socket, msg.decode('ascii') + '\n')
+                    send(from_socket, msg.decode('utf-8', 'replace') + '\n')
+
+                else:
+                    send(from_socket, 'Internal error: unexpected fd\n')
+                    break
 
         to_socket.close()
-        send(socket, 'Disconnected\n')
+        send(from_socket, 'Disconnected\n')
 
     except Exception as e:
-        send(socket, f'Exception {e} while connecting sockets, line number: {e.__traceback__.tb_lineno}\n')
+        send(from_socket, f'Exception {e} while connecting sockets, line number: {e.__traceback__.tb_lineno}\n')
 
 
-def redirect_axcall(callsign, socket):
+def redirect_axcall(callsign, s):
     try:
         to_socket = ax25.socket.Socket()
         rc = to_socket.connect_ex(callsign)
         if rc != 0:
             to_socket.close()
-            send(socket, f'Cannot connect to {callsign}: {os.strerror(rc)}\n')
+            send(s, f'Cannot connect to {callsign}: {os.strerror(rc)}\n')
             return
 
-        redirect_sockets(to_socket, socket)
+        redirect_sockets(to_socket, s)
 
     except Exception as e:
-        send(socket, f'Exception {e} while performing axcall, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing axcall, line number: {e.__traceback__.tb_lineno}\n')
 
 
-def redirect_telnet(addr, socket):
+def redirect_telnet(addr, s):
     try:
         to_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         rc = to_socket.connect(addr)
-        if rc != 0:
+        if rc != 0 and rc != None:  # None for regular socket
             to_socket.close()
-            send(socket, f'Cannot connect to {callsign}: {os.strerror(rc)}\n')
-            return
-
-        redirect_sockets(to_socket, socket)
+            send(s, f'Cannot connect to {addr}: {os.strerror(rc)}\n')
+        else:
+            send(s, 'Connected\n')
+            redirect_sockets(to_socket, s)
 
     except Exception as e:
-        send(socket, f'Exception {e} while performing telnet, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing telnet to {addr}, line number: {e.__traceback__.tb_lineno}\n')
 
 
-def list_mail(call, socket):
+def list_mail(call, s):
     con = sqlite3.connect(mail_db)
     cur = con.cursor()
     try:
         cur.execute("SELECT id, `from`, `when` FROM mail WHERE `when` >= date('now','-1 month') AND `to`=? ORDER BY `when` DESC", (call,))
         for row in cur:
-            send(socket, f'{row[0]}: {row[1]} - {row[2]}\n')
+            send(s, f'{row[0]}: {row[1]} - {row[2]}\n')
     except Exception as e:
-        send(socket, f'Exception {e} while performing list_mail, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing list_mail, line number: {e.__traceback__.tb_lineno}\n')
     cur.close()
     con.close()
 
 
-def get_mail(nr, socket):
+def get_mail(nr, s):
     con = sqlite3.connect(mail_db)
     cur = con.cursor()
     try:
         cur.execute("SELECT `from`, `when`, what FROM mail WHERE id=?", (nr,))
         row = cur.fetchone()
-        send(socket, f'From: {row[0]} ({row[1]})\n')
+        send(s, f'From: {row[0]} ({row[1]})\n')
         for line in row[2].split('\n'):
-            send(socket, line + '\n')
+            send(s, line + '\n')
     except Exception as e:
-        send(socket, f'Exception {e} while performing get_mail, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing get_mail, line number: {e.__traceback__.tb_lineno}\n')
     cur.close()
     con.close()
 
 
-def get_line(socket):
-    line = socket.recv(256)
+def get_line(s):
+    line = s.recv(256)
     if line == None:
         return None
 
@@ -126,13 +134,14 @@ def get_line(socket):
     return line
 
 
-def send_mail(from_, to, msg, socket):
+def send_mail(from_, to, msg, s):
     con = sqlite3.connect(mail_db)
     cur = con.cursor()
     try:
         cur.execute('INSERT INTO mail(`id`, `from`, `to`, `when`, what) VALUES(NULL, ?, ?, CURRENT_TIMESTAMP, ?)', (from_, to, msg))
+        send(s, 'Mail sent')
     except Exception as e:
-        send(socket, f'Exception {e} while performing send_mail, line number: {e.__traceback__.tb_lineno}\n')
+        send(s, f'Exception {e} while performing send_mail, line number: {e.__traceback__.tb_lineno}\n')
     cur.close()
     con.commit()
     con.close()
@@ -271,7 +280,7 @@ def client_handler(s, call, is_tcp):
                     redirect_axcall(parts[1], s)
 
                 elif parts[0] == 'a':
-                    redirect_telnet(('localhost', 2030), s)
+                    redirect_telnet(('127.0.0.1', 2030), s)
 
                 else:
                     send(s, '???\n')
