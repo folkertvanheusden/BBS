@@ -40,21 +40,29 @@ def redirect_sockets(to_socket, from_socket):
         from_socket_fd = from_socket.fileno()
         to_socket_fd = to_socket.fileno()
 
-        while True:
+        end = False
+        while end == False:
             rc = p.poll(86400)
             if len(rc) == 0:
                 send(from_socket, 'timeout\n')
                 break
 
             for e in rc:
+                if e[1] & select.POLLHUP:
+                    end = True
+                    break
+
                 if e[0] == from_socket_fd:
                     msg = from_socket.recv(256)
-                    print(msg)
+                    if len(msg) == 0:
+                        break
                     send(to_socket, msg.decode('ascii') + '\n')
 
                 elif e[0] == to_socket_fd:
                     msg = to_socket.recv(256)
-                    send(from_socket, msg.decode('utf-8', 'replace') + '\n')
+                    if len(msg) == 0:
+                        break
+                    send(from_socket, msg.decode('utf-8', 'ignore') + '\n')
 
                 else:
                     send(from_socket, 'Internal error: unexpected fd\n')
