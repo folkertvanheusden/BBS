@@ -14,6 +14,8 @@ mail_db = 'mail.db'
 online = set()
 online_lock = threading.Lock()
 
+chatters = dict()
+chatters_lock = threading.Lock()
 
 def send(s, str_):
     s.send(str_.encode('utf-8'))
@@ -149,6 +151,41 @@ def list_online(s):
         send(s, ', '.join(temp) + '\n')
 
 
+def get_chatters_count():
+    global chatters_lock
+    global chatters
+    with chatters_lock:
+        return len(chatters)
+
+def chat(callsign, s):
+    global chatters_lock
+    global chatters
+
+    send(s, 'Send QUIT to stop\n')
+
+    with chatters_lock:
+        for target in chatters:
+            send(chatters[target], f' *[{callsign}] entered the chat\n')
+        chatters[callsign] = s
+
+    while True:
+        line = get_line(s)
+        if line is None or line == 'QUIT':
+            break
+
+        with chatters_lock:
+            for target in chatters:
+                to_socket = chatters[target]
+                if to_socket == s:
+                    continue
+                send(to_socket, f'[{callsign}] {line}\n')
+
+    with chatters_lock:
+        del chatters[callsign]
+        for target in chatters:
+            send(chatters[target], f' * [{callsign}] left\n')
+
+
 def client_handler(s, call, is_tcp):
     global online_lock
     global online
@@ -208,6 +245,7 @@ def client_handler(s, call, is_tcp):
                     send(s, 'o - users on-line\n')
                     send(s, 'c callsign - connect to "callsign"\n')
                     send(s, 't host [port] - telnet\n')
+                    send(s, f'C - chat, {get_chatters_count()}\n')
 
                 elif parts[0] == 'q':
                     break
@@ -218,12 +256,15 @@ def client_handler(s, call, is_tcp):
                 elif parts[0] == 'o':
                     list_online(s)
 
-                elif parts[0] == 'o':
-                    list_online(s)
-
                 elif parts[0] == 't' and len(parts) >= 2:
                     port = 23 if len(parts) == 2 else int(parts[2])
                     redirect_telnet((parts[1], port), s)
+
+                elif parts[0] == 'C':
+                    chat(call, s)
+
+                elif parts[0] == 'M':
+                    menu = 1
                     h_for_help = True
 
                 elif parts[0] == 'c' and len(parts) == 2:
