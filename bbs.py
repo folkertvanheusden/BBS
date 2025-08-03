@@ -134,12 +134,18 @@ def get_mail(nr, s):
 
 
 def get_line(s):
-    line = s.recv(256)
-    if line == None:
-        return None
+    try:
+        line = s.recv(256)
+        if line == None:
+            return None
 
-    line = line.decode('ascii').rstrip('\n').rstrip('\r').strip()
-    return line
+        line = line.decode('ascii').rstrip('\n').rstrip('\r').strip()
+        return line
+
+    except Exception as e:
+        send(s, f'Exception {e} while performing get_mail, line number: {e.__traceback__.tb_lineno}\n')
+
+    return None
 
 
 def send_mail(from_, to, msg, s):
