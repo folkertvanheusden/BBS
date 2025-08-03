@@ -136,6 +136,7 @@ def send_mail(from_, to, msg, socket):
     con.commit()
     con.close()
 
+
 def list_online(s):
     global online_lock
     global online
@@ -207,6 +208,7 @@ def client_handler(s, call, is_tcp):
                     send(s, 'a - archie\n')
                     send(s, 'o - users on-line\n')
                     send(s, 'c callsign - connect to "callsign"\n')
+                    send(s, 't host [port] - telnet\n')
 
                 elif parts[0] == 'q':
                     break
@@ -217,8 +219,12 @@ def client_handler(s, call, is_tcp):
                 elif parts[0] == 'o':
                     list_online(s)
 
-                elif parts[0] == 'M':
-                    menu = 1
+                elif parts[0] == 'o':
+                    list_online(s)
+
+                elif parts[0] == 't' and len(parts) >= 2:
+                    port = 23 if len(parts) == 2 else int(parts[2])
+                    redirect_telnet((parts[1], port), s)
                     h_for_help = True
 
                 elif parts[0] == 'c' and len(parts) == 2:
