@@ -6,7 +6,6 @@ import select
 import socket
 import sqlite3
 import subprocess
-import sys
 import threading
 
 
@@ -280,6 +279,20 @@ def client_handler(s, call, is_tcp):
     online.remove(call)
     online_lock.release()
 
+
+def server_handler(s, is_tcp):
+    s.listen(128)
+
+    while True:
+        client = s.accept()
+
+        print(f'Connected to {client[1]}')
+
+        tc = threading.Thread(target=client_handler, args=(client[0], client[1], is_tcp))
+        tc.daemon = True
+        tc.start()
+
+
 # create mail database
 con = sqlite3.connect(mail_db)
 try:
@@ -294,22 +307,16 @@ except Exception as e:
 con.close()
 
 
-if 'tcp' in sys.argv:
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', 2300))
+tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+tcp_server.bind(('0.0.0.0', 2300))
+t1 = threading.Thread(target=server_handler, args=(tcp_server, True))
+t1.start()
 
-else:
-    server = ax25.socket.Socket()
-    server.bind('PI1GDA-1')
+ax25_server = ax25.socket.Socket()
+ax25_server.bind('PI1GDA-1')
+t2 = threading.Thread(target=server_handler, args=(ax25_server, False))
+t2.start()
 
-server.listen(128)
-
-while True:
-    client = server.accept()
-
-    print(f'Connected to {client[1]}')
-
-    t = threading.Thread(target=client_handler, args=(client[0], client[1], 'tcp' in sys.argv))
-    t.daemon = True
-    t.start()
+t2.join()
+t1.join()
