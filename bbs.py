@@ -216,33 +216,33 @@ def client_handler(s, call, is_tcp):
     global online_lock
     global online
 
-    h_for_help = True
-
-    send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n\n')
-
-    if is_tcp:
-        while True:
-            send(s, 'Please enter your call sign: ')
-            call = get_line(s)
-            if call is None:
-                s.close()
-                return
-            call = call.upper()
-
-            if len(call) > 0:
-                break
-
-    send(s, f'\nWelcome {call}!\n\n')
-
-    list_online(s)
-
-    online_lock.acquire()
-    online.add(call)
-    online_lock.release()
-
-    menu = 0
-
     try:
+        h_for_help = True
+
+        send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n\n')
+
+        if is_tcp:
+            while True:
+                send(s, 'Please enter your call sign: ')
+                call = get_line(s)
+                if call is None:
+                    s.close()
+                    return
+                call = call.upper()
+
+                if len(call) > 0:
+                    break
+
+        send(s, f'\nWelcome {call}!\n\n')
+
+        list_online(s)
+
+        online_lock.acquire()
+        online.add(call)
+        online_lock.release()
+
+        menu = 0
+
         while True:
             if h_for_help:
                 send(s, 'Enter "h" (+ enter) for help\n')
@@ -336,15 +336,19 @@ def client_handler(s, call, is_tcp):
                     send(s, '???\n')
                     h_for_help = True
 
+        send(s, 'Bye bye\n\n')
+
+    except BrokenPipeError as bpe:
+        print(f'Disconnected {bpe}')
+
     except Exception as e:
         send(s, f'Internal error: {e}, line number: {e.__traceback__.tb_lineno}\n')
-
-    send(s, 'Bye bye\n\n')
 
     s.close()
 
     online_lock.acquire()
-    online.remove(call)
+    if call in online:
+        online.remove(call)
     online_lock.release()
 
 
