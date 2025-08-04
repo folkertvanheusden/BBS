@@ -219,7 +219,7 @@ def client_handler(s, call, is_tcp):
     try:
         h_for_help = True
 
-        send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\n\n')
+        send(s, f'This BBS software was written by Folkert van Heusden <folkert@vanheusden.com>\nYou can get a copy of this software rom https://github.com/folkertvanheusden/BBS\n\n')
 
         if is_tcp:
             while True:
