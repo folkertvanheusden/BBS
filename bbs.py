@@ -9,7 +9,9 @@ import subprocess
 import threading
 
 
+callsign = 'PI1GDA-1'
 mail_db = 'mail.db'
+tcp_port = 2300
 
 online = set()
 online_lock = threading.Lock()
@@ -180,6 +182,7 @@ def get_chatters_count():
     with chatters_lock:
         return len(chatters)
 
+
 def chat(callsign, s):
     global chatters_lock
     global chatters
@@ -231,10 +234,11 @@ def client_handler(s, call, is_tcp):
 
     send(s, f'\nWelcome {call}!\n\n')
 
+    list_online(s)
+
     online_lock.acquire()
     online.add(call)
     online_lock.release()
-    list_online(s)
 
     menu = 0
 
@@ -365,22 +369,24 @@ try:
     cur.execute('CREATE TABLE mail(`id` integer primary key, `from` text, `to` text, `when` int, what text)')
     cur.close()
     con.commit()
+except sqlite3.OperationalError as soe:
+    pass
 except Exception as e:
     print(e)
-    pass
 con.close()
 
 
 tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-tcp_server.bind(('0.0.0.0', 2300))
+tcp_server.bind(('0.0.0.0', tcp_port))
 t1 = threading.Thread(target=server_handler, args=(tcp_server, True))
 t1.start()
 
 ax25_server = ax25.socket.Socket()
-ax25_server.bind('PI1GDA-1')
+ax25_server.bind(callsign)
 t2 = threading.Thread(target=server_handler, args=(ax25_server, False))
 t2.start()
 
+print('Go!')
 t2.join()
 t1.join()
